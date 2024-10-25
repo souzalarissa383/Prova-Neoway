@@ -1,42 +1,57 @@
-from flask import Flask, request, jsonify  # Importa as bibliotecas necessárias do Flask
-import sqlite3  # Importa a biblioteca SQLite para manipulação do banco de dados
-import re  # Importa a biblioteca para expressões regulares, usada na validação
+# Foi utilizado Flask para criar a API, junto com sqlite para manipular o banco de dados e o re para validar o CPF.
+from flask import Flask, request, jsonify  
+import sqlite3  
+import re 
 
-app = Flask(__name__)  # Cria uma instância da aplicação Flask
+# Cria a instância do Flask
+app = Flask(__name__) 
 
-# Função para conectar ao banco de dados SQLite
+#Aqui temos uma função simples que abre a conexão com o banco de dados. Ela será chamada sempre que precisarmos realizar operações no banco.
 def get_db_connection():
-    return sqlite3.connect('clientes.db')  # Retorna uma nova conexão ao banco de dados
+    return sqlite3.connect('clientes.db') 
 
-# Função para validar o CPF
+#A primeira coisa que fazemos é remover qualquer caractere que não seja numérico usando expressões, assim garantimos que o CPF seja tratado corretamente.
 def validar_cpf(cpf):
-    cpf = re.sub(r'\D', '', cpf)  # Remove caracteres não numéricos do CPF
-    if len(cpf) != 11:  # Verifica se o CPF tem 11 dígitos
-        return False  # Retorna False se o CPF não tiver 11 dígitos
-    # Validação do CPF utilizando fórmula específica
-    primeiro_digito = sum(int(d) * (10 - i) for i, d in enumerate(cpf[:9])) % 11  # Calcula o primeiro dígito verificador
-    segundo_digito = sum(int(d) * (11 - i) for i, d in enumerate(cpf[:10])) % 11  # Calcula o segundo dígito verificador
-    # Compara os dígitos calculados com os dígitos finais do CPF
-    return cpf[-2:] == f"{primeiro_digito % 10}{segundo_digito % 10}"  # Retorna True se os dígitos verificadores estiverem corretos
+    # Apos isso removemos caracteres não numéricos e verificamos se o CPF tem 11 dígitos. Depois calculamos os dígitos para garantir que o CPF seja válido.
+    cpf = re.sub(r'\D', '', cpf)
+    if len(cpf) != 11: 
+        return False  
+    
+    # Para os primeiros 9 dígitos do CPF, multiplicamos cada um pelo valor de uma sequência decrescente (10 a 2).
+    # Depois somamos todos esses resultados e pegamos o resto da divisão por 11.
+    primeiro_digito = sum(int(d) * (10 - i) for i, d in enumerate(cpf[:9])) % 11 
 
-# Rota para upload do arquivo
+    # Para os primeiros 10 dígitos multiplicamos cada um por uma sequência decrescente (11 a 2).
+    # Somamos esses resultados e pegamos o resto da divisão por 11.
+    segundo_digito = sum(int(d) * (11 - i) for i, d in enumerate(cpf[:10])) % 11  
+
+    # Retorna True se os dois dígitos calculados forem iguais aos dois últimos dígitos do CPF
+    return cpf[-2:] == f"{primeiro_digito % 10}{segundo_digito % 10}" 
+
+# "A primeira rota é a /upload, que permite o envio de um arquivo com dados dos clientes.
 @app.route('/upload', methods=['POST'])
+
 def upload_file():
-    file = request.files['file']  # Obtém o arquivo enviado na requisição
-    lines = file.read().decode('utf-8').strip().splitlines()  # Lê o conteúdo do arquivo, decodifica e divide em linhas
-    conn = get_db_connection()  # Conecta ao banco de dados
-    cursor = conn.cursor()  # Cria um cursor para executar comandos SQL
+    # Pegamos o arquivo enviado, lemos o conteúdo e dividindo cada linha em uma lista.
+    file = request.files['file']  #
+    lines = file.read().decode('utf-8').strip().splitlines() 
 
-    clientes_inseridos = []  # Lista para armazenar os clientes inseridos
+    # Conecta ao banco de dados e cria um cursor para executar comandos SQL
+    conn = get_db_connection()  
+    cursor = conn.cursor()  
 
-    # Processa cada linha do arquivo
+    # Lista para armazenar dados dos clientes que forem inseridos no banco
+    clientes_inseridos = []  
+
+    # Alem de processar cada linha do arquivo dividimos os dados e verificamos se o CPF é válido antes de inserir no banco de dados.
     for line in lines:
         data = line.split()  # Divide a linha em partes (dados)
         if len(data) == 8 and validar_cpf(data[0]):  # Verifica se a linha contém 8 dados e se o CPF é válido
+            # Aqui estamos inserindo os dados dos clientes no banco de dados, usando INSERT OR IGNORE para evitar duplicatas.
             cursor.execute('''
                 INSERT OR IGNORE INTO clientes (cpf, private, incompleto, data_ultima_compra, 
                 ticket_medio, ticket_ultima_compra, loja_frequente, loja_ultima_compra) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)''', tuple(data))  # Insere os dados no banco de dados
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)''', tuple(data))  
             
             # Adiciona os dados do cliente à lista em formato de dicionário
             cliente_dict = {
@@ -58,19 +73,21 @@ def upload_file():
     # Retorna a mensagem de sucesso e os dados dos clientes inseridos
     return jsonify({
         'message': 'Arquivo carregado com sucesso!',
-        'clientes': clientes_inseridos  # Inclui os dados dos clientes inseridos
-    }), 200  # Retorna uma resposta JSON com status 200
+        'clientes': clientes_inseridos  
+    }), 200 
 
-# Rota para listar todos os clientes em formato JSON
+# A próxima rota é a /clientes, que retorna todos os registros em formato JSON.
 @app.route('/clientes', methods=['GET'])
 def listar_clientes():
-    conn = get_db_connection()  # Conecta ao banco de dados
-    cursor = conn.cursor()  # Cria um cursor
+    # Conecta ao banco de dados e cria um cursor para executar comandos SQL
+    conn = get_db_connection()  
+    cursor = conn.cursor() 
 
-    cursor.execute('SELECT * FROM clientes')  # Executa a consulta para obter todos os registros
-    clientes = cursor.fetchall()  # Obtém todos os registros retornados
+    # Executa uma consulta SQL para obter todos os registros na tabela `clientes`
+    cursor.execute('SELECT * FROM clientes Where private = "0"')  
+    clientes = cursor.fetchall() 
 
-    # Formata os dados em uma lista de dicionários
+    # Pegamos cada cliente do banco e formatamos para ser enviado como resposta JSON.
     lista_clientes = []
     for cliente in clientes:
         lista_clientes.append({
@@ -89,15 +106,16 @@ def listar_clientes():
     conn.close()  # Fecha a conexão com o banco
     return jsonify(lista_clientes), 200  # Retorna a lista de clientes em formato JSON
 
-# Função para inicializar o banco de dados
+
+# Por fim temos a rota /init, que inicializa o banco de dados, criando a tabela de clientes se ainda não existir.
 def init_db():
-    conn = get_db_connection()  # Conecta ao banco de dados
-    cursor = conn.cursor()  # Cria um cursor
-    # Cria a tabela de clientes se ela não existir
-    cursor.execute('''  
+    conn = get_db_connection() 
+    cursor = conn.cursor()  
+
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS clientes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,  # ID único e auto-incrementável
-            cpf TEXT UNIQUE,  # CPF único
+            id INTEGER PRIMARY KEY AUTOINCREMENT, 
+            cpf TEXT UNIQUE,  
             private TEXT,
             incompleto TEXT,
             data_ultima_compra TEXT,
